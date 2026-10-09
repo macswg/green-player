@@ -16,7 +16,8 @@ To use it offline, download `index.html` and double-click it.
 ## Use
 
 1. Click **Open folder…** and pick the folder of recordings (or drag it onto the window).
-   If the browser asks to "upload" the folder, that only lets the page read it locally.
+   Chrome and Edge ask to let the site view the folder; Safari and Firefox may say
+   "upload", but either way the page only reads it locally.
 2. Pick a take on the left. Its markers are listed on the right.
 3. Click a marker to jump to it, double-click to jump and play.
 
