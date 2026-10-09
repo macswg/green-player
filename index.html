@@ -1,0 +1,881 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marker Player</title>
+<!--
+Marker Player: plays recorded takes (.mp4) with the markers logged
+beside them (<video name>.markers.csv). One file, no install, nothing leaves the
+machine: open it in Chrome, Edge, Safari or Firefox on Mac or PC, then open the
+folder of recordings (or drop files / a folder on the window).
+
+Search: words must all match (any column); * is a wildcard; -word hides markers
+that contain it; "quoted phrase" matches as written. e.g.  verse* -intro "show_b"
+-->
+<style>
+:root {
+	--bg: #111316;
+	--panel: #181b20;
+	--panel-2: #1f232a;
+	--line: #2c313a;
+	--text: #e6e8eb;
+	--muted: #8b929d;
+	--accent: #4c9bff;
+	--accent-dim: #24476f;
+	--danger: #ff6b6b;
+	--t-start: #8b929d;
+	--t-track: #c38bff;
+	--t-section: #4c9bff;
+	--t-play: #3ecf8e;
+	--t-mark: #ffb347;
+	--t-stop: #ff6b6b;
+	--radius: 6px;
+	color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+	background: var(--bg);
+	color: var(--text);
+	font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+button, select, input { font: inherit; color: inherit; }
+button {
+	background: var(--panel-2);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	padding: 5px 10px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+button:hover { border-color: var(--muted); }
+button:disabled { opacity: .4; cursor: default; }
+button.on { background: var(--accent-dim); border-color: var(--accent); }
+select, input[type=search] {
+	background: var(--panel-2);
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	padding: 5px 8px;
+}
+input[type=search]:focus { outline: none; border-color: var(--accent); }
+kbd {
+	font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	background: var(--panel-2);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	padding: 0 4px;
+}
+
+header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--line);
+	background: var(--panel);
+	flex-wrap: wrap;
+}
+header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; }
+#takeTitle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.hidden-input { display: none; }
+
+main {
+	flex: 1;
+	min-height: 0;
+	display: grid;
+	grid-template-columns: 260px minmax(0, 1fr) 380px;
+}
+main.takes-collapsed { grid-template-columns: 0 minmax(0, 1fr) 380px; }
+main.takes-collapsed #takesPanel { display: none; }
+
+aside { background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+#takesPanel { border-right: 1px solid var(--line); }
+#markersPanel { border-left: 1px solid var(--line); }
+.panel-head { padding: 10px 12px 8px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.panel-head h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0; font-weight: 600; }
+.scroll { overflow-y: auto; flex: 1; min-height: 0; }
+
+#takeList { list-style: none; margin: 0; padding: 4px 0; }
+#takeList .folder { padding: 8px 12px 4px; font-size: 12px; color: var(--muted); }
+#takeList .take { padding: 6px 12px; cursor: pointer; border-left: 3px solid transparent; word-break: break-all; }
+#takeList .take:hover { background: var(--panel-2); }
+#takeList .take.active { background: var(--panel-2); border-left-color: var(--accent); }
+#takeList .take small { display: block; color: var(--muted); }
+
+#stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px; gap: 10px; }
+#now { min-height: 22px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#now b { color: var(--text); font-weight: 600; }
+#videoWrap { flex: 1; min-height: 0; background: #000; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; position: relative; }
+video { width: 100%; height: 100%; object-fit: contain; display: block; }
+video:not([src]) { visibility: hidden; }
+#empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); text-align: center; padding: 20px; }
+#empty.gone { display: none; }
+#videoError { position: absolute; left: 12px; right: 12px; bottom: 12px; background: #3a1d1d; border: 1px solid var(--danger); border-radius: var(--radius); padding: 8px 10px; display: none; }
+
+#timeline { position: relative; height: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+#timeline .progress { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-dim); border-radius: var(--radius) 0 0 var(--radius); pointer-events: none; }
+#timeline .section { position: absolute; top: 0; bottom: 0; background: rgba(76, 155, 255, .18); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent); pointer-events: none; }
+#timeline .tick { position: absolute; top: 3px; bottom: 3px; width: 3px; margin-left: -1px; border-radius: 2px; }
+#timeline .tick:hover { top: 0; bottom: 0; width: 5px; margin-left: -2px; }
+#timeline .playhead { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #fff; pointer-events: none; }
+
+#transport { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#clock { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); margin-left: auto; }
+#clock b { color: var(--text); font-weight: 500; }
+
+#search { width: 100%; }
+#chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; }
+.chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.chip:not(.on) { opacity: .45; }
+#markerMeta { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+#markerMeta label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+#scaleNote { font-size: 12px; color: var(--t-mark); display: none; }
+
+#markerList { list-style: none; margin: 0; padding: 4px 0; }
+#markerList li { display: grid; grid-template-columns: 68px 1fr; gap: 2px 10px; padding: 6px 12px; cursor: pointer; border-left: 3px solid transparent; }
+#markerList li:hover { background: var(--panel-2); }
+#markerList li.current { background: var(--panel-2); border-left-color: var(--accent); }
+#markerList .t { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); padding-top: 2px; }
+#markerList .label { word-break: break-word; }
+#markerList .label mark { background: #5c4a1a; color: inherit; border-radius: 2px; }
+#markerList .sub { grid-column: 2; font-size: 12px; color: var(--muted); word-break: break-word; }
+#markerList .type { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; margin-right: 6px; }
+#markerList .none { display: block; color: var(--muted); cursor: default; padding: 16px 12px; }
+#markerList .none:hover { background: none; }
+
+#drop { position: fixed; inset: 0; background: rgba(17, 19, 22, .85); border: 3px dashed var(--accent); display: none; align-items: center; justify-content: center; font-size: 20px; z-index: 10; pointer-events: none; }
+#drop.show { display: flex; }
+
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; max-width: 560px; padding: 18px 22px; }
+dialog::backdrop { background: rgba(0, 0, 0, .6); }
+dialog h3 { margin: 0 0 8px; font-size: 15px; }
+dialog table { border-collapse: collapse; width: 100%; margin-bottom: 12px; }
+dialog td { padding: 3px 8px 3px 0; vertical-align: top; }
+dialog td:first-child { white-space: nowrap; }
+dialog code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--panel-2); padding: 1px 4px; border-radius: 3px; }
+
+@media (max-width: 900px) {
+	body { overflow: auto; }
+	main, main.takes-collapsed { display: flex; flex-direction: column; }
+	#takesPanel { max-height: 30vh; border-right: 0; border-bottom: 1px solid var(--line); }
+	#stage { min-height: 60vh; }
+	#markersPanel { border-left: 0; border-top: 1px solid var(--line); min-height: 50vh; }
+}
+</style>
+</head>
+<body>
+<header>
+	<h1>Marker Player</h1>
+	<button id="toggleTakes" title="Show / hide the take list">Takes</button>
+	<button id="openFolder">Open folder…</button>
+	<button id="openFiles">Open files…</button>
+	<input class="hidden-input" id="folderInput" type="file" webkitdirectory multiple>
+	<input class="hidden-input" id="filesInput" type="file" multiple accept="video/*,.mp4,.mov,.m4v,.webm,.csv">
+	<span id="takeTitle"></span>
+	<button id="helpBtn" title="Keyboard shortcuts and search syntax">?</button>
+</header>
+
+<main id="main">
+	<aside id="takesPanel">
+		<div class="panel-head">
+			<h2>Takes</h2>
+			<input type="search" id="takeSearch" placeholder="Filter takes">
+		</div>
+		<ul id="takeList" class="scroll"></ul>
+	</aside>
+
+	<section id="stage">
+		<div id="now"></div>
+		<div id="videoWrap">
+			<video id="video" controls playsinline preload="metadata"></video>
+			<div id="empty">
+				<div>Open the folder of recordings, or drop a folder or files here.</div>
+				<div><button id="openFolder2">Open folder…</button></div>
+			</div>
+			<div id="videoError"></div>
+		</div>
+		<div id="timeline" title="Click to seek. Ticks are markers."></div>
+		<div id="transport">
+			<button id="prevBtn" title="Previous marker (↑ or [)">◀ Marker</button>
+			<button id="playBtn" title="Play / pause (Space)">Play</button>
+			<button id="nextBtn" title="Next marker (↓ or ])">Marker ▶</button>
+			<button id="sectionBtn" title="Play from the current marker to the next one, then stop (P)">Play section</button>
+			<button id="loopBtn" title="Loop the section instead of stopping (L)">Loop</button>
+			<select id="rate" title="Playback speed">
+				<option value="0.25">0.25×</option>
+				<option value="0.5">0.5×</option>
+				<option value="1" selected>1×</option>
+				<option value="1.5">1.5×</option>
+				<option value="2">2×</option>
+			</select>
+			<span id="clock"><b>0:00.0</b> / 0:00.0</span>
+		</div>
+	</section>
+
+	<aside id="markersPanel">
+		<div class="panel-head">
+			<h2>Markers</h2>
+			<input type="search" id="search" placeholder='Search: verse* -intro "show_b"' spellcheck="false">
+			<div id="chips"></div>
+			<div id="markerMeta">
+				<span id="markerCount">No markers</span>
+				<label title="Keep the current marker in view while playing"><input type="checkbox" id="follow" checked> Follow</label>
+			</div>
+			<div id="scaleNote"></div>
+		</div>
+		<ul id="markerList" class="scroll"></ul>
+	</aside>
+</main>
+
+<div id="drop">Drop a folder or files</div>
+
+<dialog id="help">
+	<h3>Search</h3>
+	<table>
+		<tr><td><code>verse</code></td><td>markers containing “verse” in any column (label, type, transport, track, section, cue)</td></tr>
+		<tr><td><code>verse*2</code></td><td><code>*</code> is a wildcard: “Verse 2”, “verse 1 into 2”…</td></tr>
+		<tr><td><code>-intro</code></td><td>hide markers containing “intro”</td></tr>
+		<tr><td><code>"show_b"</code></td><td>quotes keep spaces: <code>"verse 2"</code>, <code>-"pre roll"</code></td></tr>
+		<tr><td><code>chorus -mark</code></td><td>all words must match: chorus markers, without manual marks</td></tr>
+	</table>
+	<p style="margin:0 0 12px;color:var(--muted)">Not case-sensitive. The type buttons under the search box filter too. Enter in the search box jumps to the first result.</p>
+	<h3>Keys</h3>
+	<table>
+		<tr><td><kbd>Space</kbd></td><td>play / pause</td></tr>
+		<tr><td><kbd>↑</kbd> <kbd>↓</kbd> or <kbd>[</kbd> <kbd>]</kbd></td><td>previous / next marker (of the ones listed)</td></tr>
+		<tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>back / forward 5 s; with <kbd>Shift</kbd> one frame</td></tr>
+		<tr><td><kbd>P</kbd></td><td>play from the current marker to the next one</td></tr>
+		<tr><td><kbd>L</kbd></td><td>loop that section</td></tr>
+		<tr><td><kbd>/</kbd></td><td>search markers</td></tr>
+		<tr><td><kbd>Esc</kbd></td><td>leave the search box</td></tr>
+	</table>
+	<p style="margin:0;color:var(--muted)">Click a marker to jump to it; double-click to jump and play. ProRes <code>.mov</code> files only play in Safari on a Mac.</p>
+	<form method="dialog" style="text-align:right;margin-top:12px"><button>Close</button></form>
+</dialog>
+
+<script>
+'use strict';
+
+// ------------------------------------------------------------------ constants
+
+const VIDEO_EXT = /\.(mp4|m4v|mov|webm)$/i;
+const MARKER_SUFFIX = '.markers.csv';
+const SKIP_PATH = /(^|\/)_cache_ring\//;   // pre-roll ring buffer segments, not takes
+const FPS = 30;                              // recordings are 30 fps
+const TYPES = ['start', 'track', 'section', 'play', 'mark', 'stop'];
+const SCALE_TOLERANCE = 0.01;                // rescale marker times when video and clock differ by > 1 %
+
+// ------------------------------------------------------------------ state
+
+const state = {
+	takes: [],            // {id, name, folder, video: File, csv: File|null, modified}
+	take: null,
+	markers: [],          // all markers of the take: {t (s, CSV), type, label, transport, track, section, cue, d3_timecode, ...}
+	shown: [],            // markers after search + type filter, in time order
+	scale: 1,             // video seconds per CSV second
+	url: null,            // object URL of the loaded video
+	section: null,        // {start, end} while playing a section
+	loop: false,
+	types: new Set(TYPES),
+	currentIndex: -1,     // index into shown
+};
+
+const $ = id => document.getElementById(id);
+const video = $('video');
+
+// ------------------------------------------------------------------ storage (per-viewer conveniences only)
+
+function load(key, fallback) {
+	try { const v = localStorage.getItem('markerPlayer.' + key); return v === null ? fallback : JSON.parse(v); }
+	catch (e) { return fallback; }
+}
+function save(key, value) {
+	try { localStorage.setItem('markerPlayer.' + key, JSON.stringify(value)); } catch (e) { /* private window etc. */ }
+}
+
+// ------------------------------------------------------------------ CSV
+
+function parseCSV(text) {
+	if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+	const rows = [];
+	let row = [], field = '', inQuotes = false;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (inQuotes) {
+			if (c === '"') {
+				if (text[i + 1] === '"') { field += '"'; i++; }
+				else inQuotes = false;
+			} else field += c;
+		} else if (c === '"') inQuotes = true;
+		else if (c === ',') { row.push(field); field = ''; }
+		else if (c === '\n' || c === '\r') {
+			if (c === '\r' && text[i + 1] === '\n') i++;
+			row.push(field); field = '';
+			if (row.length > 1 || row[0] !== '') rows.push(row);
+			row = [];
+		} else field += c;
+	}
+	if (field !== '' || row.length) { row.push(field); rows.push(row); }
+	return rows;
+}
+
+function parseMarkers(text) {
+	const rows = parseCSV(text);
+	if (!rows.length) return [];
+	const head = rows[0].map(h => h.trim().toLowerCase());
+	const out = [];
+	for (const r of rows.slice(1)) {
+		const m = {};
+		head.forEach((h, i) => { m[h] = (r[i] || '').trim(); });
+		m.t = parseFloat(m.time);
+		if (!isFinite(m.t)) continue;
+		m.type = (m.type || 'mark').toLowerCase();
+		m.label = m.label || m.section || m.track || m.type;
+		m.search = [m.label, m.type, m.transport, m.track, m.section, m.cue].filter(Boolean).join(' · ');
+		out.push(m);
+	}
+	out.sort((a, b) => a.t - b.t);
+	return out;
+}
+
+// ------------------------------------------------------------------ search
+
+function escapeRegex(s) { return s.replace(/[.+?^${}()|[\]\\]/g, '\\$&'); }
+
+// term -> RegExp: '*' matches anything, everything else literally, case-insensitive
+function termRegex(text, lazy) {
+	const src = text.split('*').map(escapeRegex).join(lazy ? '.*?' : '.*');
+	return new RegExp(src, lazy ? 'gi' : 'i');
+}
+
+// 'verse* -intro "show b"' -> [{neg:false, text:'verse*'}, {neg:true, text:'intro'}, {neg:false, text:'show b'}]
+function parseQuery(q) {
+	const terms = [];
+	const re = /(-?)(?:"([^"]*)"?|(\S+))/g;
+	let m;
+	while ((m = re.exec(q)) !== null) {
+		const neg = m[1] === '-';
+		const text = m[2] !== undefined ? m[2] : m[3];
+		if (text === undefined || text === '' || text === '-' || /^\*+$/.test(text)) continue;
+		terms.push({ neg, text, rx: termRegex(text, false) });
+	}
+	return terms;
+}
+
+function matches(marker, terms) {
+	for (const term of terms) {
+		if (term.rx.test(marker.search) === term.neg) return false;
+	}
+	return true;
+}
+
+function highlight(text, terms) {
+	const pos = terms.filter(t => !t.neg);
+	if (!pos.length) return escapeHtml(text);
+	const ranges = [];
+	for (const t of pos) {
+		const core = t.text.replace(/^\*+|\*+$/g, '');   // leading / trailing * would mark the whole label
+		if (!core) continue;
+		const rx = termRegex(core, true);
+		let m;
+		while ((m = rx.exec(text)) !== null) {
+			if (m[0] === '') { rx.lastIndex++; continue; }
+			ranges.push([m.index, m.index + m[0].length]);
+		}
+	}
+	if (!ranges.length) return escapeHtml(text);
+	ranges.sort((a, b) => a[0] - b[0]);
+	let html = '', at = 0;
+	for (const [s, e] of ranges) {
+		if (e <= at) continue;
+		const from = Math.max(s, at);
+		html += escapeHtml(text.slice(at, from)) + '<mark>' + escapeHtml(text.slice(from, e)) + '</mark>';
+		at = e;
+	}
+	return html + escapeHtml(text.slice(at));
+}
+
+function escapeHtml(s) {
+	return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ------------------------------------------------------------------ time
+
+function fmt(sec, tenths = true) {
+	if (!isFinite(sec) || sec < 0) sec = 0;
+	sec = tenths ? Math.round(sec * 10) / 10 : Math.floor(sec);   // round first, so 59.96 is 1:00.0, not 0:60.0
+	const h = Math.floor(sec / 3600);
+	const m = Math.floor(sec / 60) % 60;
+	const s = sec % 60;
+	const ss = tenths ? s.toFixed(1).padStart(4, '0') : String(Math.floor(s)).padStart(2, '0');
+	return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + ss;
+}
+
+const videoTime = m => m.t * state.scale;
+
+// ------------------------------------------------------------------ files -> takes
+
+const naturalCompare = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
+
+function addFiles(entries) {   // entries: [{file, path}]
+	const byPath = new Map();
+	for (const e of entries) {
+		const path = e.path.replace(/^\/+/, '');
+		if (SKIP_PATH.test(path) || /(^|\/)\./.test(path)) continue;
+		byPath.set(path, e.file);
+	}
+	const takes = [];
+	for (const [path, file] of byPath) {
+		if (!VIDEO_EXT.test(path)) continue;
+		const base = path.replace(VIDEO_EXT, '');
+		const slash = path.lastIndexOf('/');
+		takes.push({
+			id: path,
+			name: path.slice(slash + 1),
+			folder: slash >= 0 ? path.slice(0, slash) : '',
+			video: file,
+			csv: byPath.get(base + MARKER_SUFFIX) || null,
+			modified: file.lastModified,
+		});
+	}
+	// a newer open replaces takes with the same path, keeps the others
+	const keep = state.takes.filter(t => !takes.some(n => n.id === t.id));
+	state.takes = keep.concat(takes).sort((a, b) =>
+		naturalCompare(a.folder, b.folder) || naturalCompare(a.name, b.name));
+	renderTakes();
+	if (!state.take && state.takes.length) {
+		const remembered = state.takes.find(t => t.id === load('lastTake', null));
+		const newest = takes.reduce((a, b) => (b.modified > a.modified ? b : a), takes[0]);
+		selectTake(remembered || newest || state.takes[0]);
+	} else if (!takes.length) {
+		flashTitle('No .mp4 / .mov files found there');
+	}
+}
+
+function flashTitle(text) {
+	$('takeTitle').textContent = text;
+	setTimeout(() => { $('takeTitle').textContent = state.take ? state.take.id : ''; }, 3000);
+}
+
+function renderTakes() {
+	const list = $('takeList');
+	const filter = parseQuery($('takeSearch').value);
+	list.innerHTML = '';
+	let folder = null, count = 0;
+	for (const take of state.takes) {
+		if (filter.length && !matches({ search: take.id }, filter)) continue;
+		if (take.folder !== folder) {
+			folder = take.folder;
+			const h = document.createElement('li');
+			h.className = 'folder';
+			h.textContent = folder || '(top folder)';
+			list.appendChild(h);
+		}
+		const li = document.createElement('li');
+		li.className = 'take' + (take === state.take ? ' active' : '');
+		li.innerHTML = escapeHtml(take.name) + '<small>' +
+			escapeHtml(new Date(take.modified).toLocaleString()) + (take.csv ? '' : ' · no markers') + '</small>';
+		li.addEventListener('click', () => selectTake(take));
+		list.appendChild(li);
+		count++;
+	}
+	if (!count) {
+		const li = document.createElement('li');
+		li.className = 'folder';
+		li.textContent = state.takes.length ? 'No takes match' : 'No takes loaded';
+		list.appendChild(li);
+	}
+}
+
+async function selectTake(take) {
+	state.take = take;
+	save('lastTake', take.id);
+	state.section = null;
+	state.markers = [];
+	state.scale = 1;
+	state.currentIndex = -1;
+	$('takeTitle').textContent = take.id;
+	$('videoError').style.display = 'none';
+	$('empty').classList.add('gone');
+	renderTakes();
+
+	if (state.url) URL.revokeObjectURL(state.url);
+	state.url = URL.createObjectURL(take.video);
+	video.src = state.url;
+	video.playbackRate = parseFloat($('rate').value);
+
+	if (take.csv) {
+		try { state.markers = parseMarkers(await take.csv.text()); }
+		catch (e) { state.markers = []; flashTitle('Could not read ' + take.csv.name); }
+	}
+	if (state.take !== take) return;   // another take was picked while reading
+	updateScale();
+	renderChips();
+	applyFilter();
+}
+
+// marker times are wall-clock seconds from REC start; if the file came out shorter
+// (the recorder follows its audio), spread them over the real video length
+function updateScale() {
+	const stop = state.markers.filter(m => m.type === 'stop').pop();
+	const note = $('scaleNote');
+	state.scale = 1;
+	if (stop && stop.t > 0 && isFinite(video.duration) && video.duration > 0) {
+		const ratio = video.duration / stop.t;
+		if (Math.abs(1 - ratio) > SCALE_TOLERANCE) state.scale = ratio;
+	}
+	if (state.scale !== 1) {
+		note.textContent = `Video is ${fmt(video.duration)} but the take ran ${fmt(stop.t)} by the clock: ` +
+			`marker times scaled ×${state.scale.toFixed(3)}.`;
+		note.style.display = 'block';
+	} else note.style.display = 'none';
+}
+
+// ------------------------------------------------------------------ markers UI
+
+function renderChips() {
+	const counts = {};
+	for (const m of state.markers) counts[m.type] = (counts[m.type] || 0) + 1;
+	const types = TYPES.concat(Object.keys(counts).filter(t => !TYPES.includes(t)));
+	const chips = $('chips');
+	chips.innerHTML = '';
+	for (const type of types) {
+		if (!counts[type]) continue;
+		const b = document.createElement('button');
+		b.className = 'chip' + (state.types.has(type) ? ' on' : '');
+		b.innerHTML = `<i style="background:${typeColor(type)}"></i>${type} ${counts[type]}`;
+		b.title = 'Show / hide ' + type + ' markers (Alt-click: only these)';
+		b.addEventListener('click', e => {
+			if (e.altKey) { state.types = new Set([type]); }
+			else if (state.types.has(type)) state.types.delete(type);
+			else state.types.add(type);
+			save('types', [...state.types]);
+			renderChips();
+			applyFilter();
+		});
+		chips.appendChild(b);
+	}
+}
+
+function typeColor(type) {
+	return getComputedStyle(document.documentElement).getPropertyValue('--t-' + type).trim() || 'var(--muted)';
+}
+
+let terms = [];
+
+function applyFilter() {
+	terms = parseQuery($('search').value);
+	state.shown = state.markers.filter(m => (state.types.has(m.type) || !TYPES.includes(m.type)) && matches(m, terms));
+	state.currentIndex = -1;
+	renderMarkers();
+	renderTimeline();
+	tick(true);
+}
+
+function renderMarkers() {
+	const list = $('markerList');
+	list.innerHTML = '';
+	const total = state.markers.length;
+	$('markerCount').textContent = total
+		? (state.shown.length === total ? `${total} markers` : `${state.shown.length} of ${total} markers`)
+		: (state.take && !state.take.csv ? 'No marker file for this take' : 'No markers');
+	if (!state.shown.length) {
+		const li = document.createElement('li');
+		li.className = 'none';
+		li.textContent = total ? 'No markers match the search.' : (state.take ? 'This take has no markers.' : 'Open a folder to start.');
+		list.appendChild(li);
+		return;
+	}
+	const frag = document.createDocumentFragment();
+	state.shown.forEach((m, i) => {
+		const li = document.createElement('li');
+		li.dataset.i = i;
+		const sub = [m.transport, m.type === 'track' || m.type === 'start' ? '' : m.track, m.cue,
+			m.d3_timecode ? 'TC ' + m.d3_timecode : '', m.clock ? 'at ' + m.clock.slice(0, 8) : ''].filter(Boolean).map(escapeHtml).join(' · ');
+		li.innerHTML =
+			`<span class="t">${fmt(videoTime(m))}</span>` +
+			`<span class="label"><span class="type" style="color:${typeColor(m.type)}">${escapeHtml(m.type)}</span>${highlight(m.label, terms)}</span>` +
+			(sub ? `<span class="sub">${sub}</span>` : '');
+		frag.appendChild(li);
+	});
+	list.appendChild(frag);
+}
+
+$('markerList').addEventListener('click', e => {
+	const li = e.target.closest('li[data-i]');
+	if (li) jumpTo(state.shown[+li.dataset.i], false);
+});
+$('markerList').addEventListener('dblclick', e => {
+	const li = e.target.closest('li[data-i]');
+	if (li) jumpTo(state.shown[+li.dataset.i], true);
+});
+
+function renderTimeline() {
+	const tl = $('timeline');
+	tl.innerHTML = '<div class="progress"></div><div class="section" style="display:none"></div>';
+	const dur = video.duration;
+	if (isFinite(dur) && dur > 0) {
+		for (const m of state.shown) {
+			const d = document.createElement('div');
+			d.className = 'tick';
+			d.style.left = Math.min(100, videoTime(m) / dur * 100) + '%';
+			d.style.background = typeColor(m.type);
+			d.title = `${fmt(videoTime(m))}  ${m.type}: ${m.label}`;
+			d.addEventListener('click', e => { e.stopPropagation(); jumpTo(m, false); });
+			tl.appendChild(d);
+		}
+	}
+	tl.insertAdjacentHTML('beforeend', '<div class="playhead"></div>');
+}
+
+$('timeline').addEventListener('click', e => {
+	if (!isFinite(video.duration)) return;
+	const r = e.currentTarget.getBoundingClientRect();
+	state.section = null;
+	video.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * video.duration;
+});
+
+// ------------------------------------------------------------------ navigation
+
+function jumpTo(m, play) {
+	if (!m || !state.take) return;
+	state.section = null;
+	video.currentTime = videoTime(m) + 0.001;   // land on the marker's frame, not the one before
+	if (play) video.play();
+	tick(true);
+}
+
+// index in shown of the last marker at or before the playhead
+function indexAt(time) {
+	let lo = 0, hi = state.shown.length - 1, found = -1;
+	while (lo <= hi) {
+		const mid = (lo + hi) >> 1;
+		if (videoTime(state.shown[mid]) <= time + 0.02) { found = mid; lo = mid + 1; }
+		else hi = mid - 1;
+	}
+	return found;
+}
+
+function prevMarker() {
+	const i = indexAt(video.currentTime);
+	if (i < 0) return;
+	// a second or more into a marker goes back to its start, like a track's back button
+	const target = video.currentTime - videoTime(state.shown[i]) > 1 || i === 0 ? i : i - 1;
+	jumpTo(state.shown[target], false);
+}
+
+function nextMarker() {
+	const i = indexAt(video.currentTime);
+	if (i + 1 < state.shown.length) jumpTo(state.shown[i + 1], false);
+}
+
+function playSection() {
+	if (!state.shown.length) return;
+	let i = indexAt(video.currentTime);
+	if (i < 0) i = 0;
+	const start = videoTime(state.shown[i]);
+	const next = state.shown.slice(i + 1).find(m => videoTime(m) > start + 0.05);
+	state.section = { start, end: next ? videoTime(next) : video.duration };
+	video.currentTime = start + 0.001;
+	video.play();
+	tick(true);
+}
+
+// ------------------------------------------------------------------ per-frame update
+
+let lastFrameTime = -1;
+
+function tick(force) {
+	const t = video.currentTime;
+	const dur = video.duration;
+
+	if (state.section && !video.paused && t >= state.section.end - 0.01) {
+		if (state.loop) video.currentTime = state.section.start + 0.001;
+		else { video.pause(); video.currentTime = Math.max(state.section.start, state.section.end - 1 / FPS); }
+	}
+	if (!force && t === lastFrameTime) return;
+	lastFrameTime = t;
+
+	$('clock').innerHTML = `<b>${fmt(t)}</b> / ${fmt(dur)}`;
+	const tl = $('timeline');
+	if (isFinite(dur) && dur > 0) {
+		const ph = tl.querySelector('.playhead'), pr = tl.querySelector('.progress'), sec = tl.querySelector('.section');
+		if (ph) ph.style.left = (t / dur * 100) + '%';
+		if (pr) pr.style.width = (t / dur * 100) + '%';
+		if (sec) {
+			if (state.section) {
+				sec.style.display = 'block';
+				sec.style.left = (state.section.start / dur * 100) + '%';
+				sec.style.width = ((state.section.end - state.section.start) / dur * 100) + '%';
+			} else sec.style.display = 'none';
+		}
+	}
+
+	const i = indexAt(t);
+	if (i !== state.currentIndex || force) {
+		const list = $('markerList');
+		const old = list.querySelector('li.current');
+		if (old) old.classList.remove('current');
+		state.currentIndex = i;
+		const li = i >= 0 ? list.querySelector(`li[data-i="${i}"]`) : null;
+		if (li) {
+			li.classList.add('current');
+			if ($('follow').checked && !list.matches(':hover')) li.scrollIntoView({ block: 'nearest' });
+		}
+		renderNow();
+	}
+}
+
+// what each d3 transport is on at the playhead, from all markers (not only the listed ones)
+function renderNow() {
+	const t = video.currentTime;
+	const byTransport = new Map();
+	for (const m of state.markers) {
+		if (videoTime(m) > t + 0.02) break;
+		if (m.transport && m.track) byTransport.set(m.transport, m);
+	}
+	const parts = [...byTransport.values()].map(m =>
+		`${escapeHtml(m.transport)}: <b>${escapeHtml(m.track)}</b>${m.section ? ' / ' + escapeHtml(m.section) : ''}`);
+	$('now').innerHTML = parts.join('&emsp;') || (state.take ? '&nbsp;' : '');
+}
+
+function loop() {
+	if (state.take) tick(false);
+	requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ------------------------------------------------------------------ video events
+
+video.addEventListener('loadedmetadata', () => { updateScale(); renderMarkers(); renderTimeline(); tick(true); });
+video.addEventListener('play', () => { $('playBtn').textContent = 'Pause'; });
+video.addEventListener('pause', () => { $('playBtn').textContent = 'Play'; });
+video.addEventListener('seeking', () => tick(true));
+video.addEventListener('error', () => {
+	const box = $('videoError');
+	const mov = state.take && /\.mov$/i.test(state.take.name);
+	box.textContent = 'This browser can’t play ' + (state.take ? state.take.name : 'this file') + '.' +
+		(mov ? ' ProRes .mov files only play in Safari on a Mac; the REC takes are .mp4.' : '');
+	box.style.display = 'block';
+});
+
+// ------------------------------------------------------------------ controls
+
+$('playBtn').addEventListener('click', () => { if (!state.take) return; video.paused ? video.play() : video.pause(); });
+$('prevBtn').addEventListener('click', prevMarker);
+$('nextBtn').addEventListener('click', nextMarker);
+$('sectionBtn').addEventListener('click', playSection);
+$('loopBtn').addEventListener('click', () => { state.loop = !state.loop; $('loopBtn').classList.toggle('on', state.loop); save('loop', state.loop); });
+$('rate').addEventListener('change', () => { video.playbackRate = parseFloat($('rate').value); save('rate', $('rate').value); });
+$('follow').addEventListener('change', () => save('follow', $('follow').checked));
+$('helpBtn').addEventListener('click', () => $('help').showModal());
+$('toggleTakes').addEventListener('click', () => {
+	const collapsed = $('main').classList.toggle('takes-collapsed');
+	$('toggleTakes').classList.toggle('on', !collapsed);
+	save('takesCollapsed', collapsed);
+});
+
+$('search').addEventListener('input', () => { save('search', $('search').value); applyFilter(); });
+$('search').addEventListener('keydown', e => {
+	if (e.key === 'Enter' && state.shown.length) { jumpTo(state.shown[0], false); e.preventDefault(); }
+	if (e.key === 'Escape') { $('search').blur(); e.preventDefault(); }
+});
+$('takeSearch').addEventListener('input', renderTakes);
+// a clicked button keeps focus, and Space would then press it again as well as play / pause
+document.addEventListener('click', e => {
+	const b = e.target.closest('button');
+	if (b && e.detail > 0) b.blur();
+});
+$('takeSearch').addEventListener('keydown', e => { if (e.key === 'Escape') $('takeSearch').blur(); });
+
+document.addEventListener('keydown', e => {
+	if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || $('help').open) return;
+	const key = e.key;
+	let handled = true;
+	if (key === ' ' || key === 'k') { if (state.take) video.paused ? video.play() : video.pause(); }
+	else if (key === 'ArrowUp' || key === '[') prevMarker();
+	else if (key === 'ArrowDown' || key === ']') nextMarker();
+	else if (key === 'ArrowLeft') { state.section = null; video.currentTime = Math.max(0, video.currentTime - (e.shiftKey ? 1 / FPS : 5)); }
+	else if (key === 'ArrowRight') { state.section = null; video.currentTime = Math.min(video.duration || 0, video.currentTime + (e.shiftKey ? 1 / FPS : 5)); }
+	else if (key === 'p' || key === 'P') playSection();
+	else if (key === 'l' || key === 'L') $('loopBtn').click();
+	else if (key === '/') $('search').focus();
+	else if (key === '?') $('help').showModal();
+	else handled = false;
+	if (handled) e.preventDefault();
+});
+
+// ------------------------------------------------------------------ opening files
+
+const openFolder = () => $('folderInput').click();
+$('openFolder').addEventListener('click', openFolder);
+$('openFolder2').addEventListener('click', openFolder);
+$('openFiles').addEventListener('click', () => $('filesInput').click());
+$('folderInput').addEventListener('change', e => {
+	addFiles([...e.target.files].map(f => ({ file: f, path: f.webkitRelativePath || f.name })));
+	e.target.value = '';
+});
+$('filesInput').addEventListener('change', e => {
+	addFiles([...e.target.files].map(f => ({ file: f, path: f.name })));
+	e.target.value = '';
+});
+
+// drag and drop of files and whole folders
+let dragDepth = 0;
+document.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; $('drop').classList.add('show'); });
+document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('drop').classList.remove('show'); } });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', async e => {
+	e.preventDefault();
+	dragDepth = 0;
+	$('drop').classList.remove('show');
+	const items = [...(e.dataTransfer.items || [])];
+	const entries = items.map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+	if (!entries.length) {
+		addFiles([...e.dataTransfer.files].map(f => ({ file: f, path: f.name })));
+		return;
+	}
+	const out = [];
+	await Promise.all(entries.map(entry => walk(entry, out)));
+	addFiles(out);
+});
+
+async function walk(entry, out) {
+	if (entry.isFile) {
+		const file = await new Promise((res, rej) => entry.file(res, rej)).catch(() => null);
+		if (file) out.push({ file, path: entry.fullPath });
+	} else if (entry.isDirectory) {
+		const reader = entry.createReader();
+		for (;;) {   // readEntries returns at most ~100 entries per call
+			const batch = await new Promise((res, rej) => reader.readEntries(res, rej)).catch(() => []);
+			if (!batch.length) break;
+			await Promise.all(batch.map(child => walk(child, out)));
+		}
+	}
+}
+
+// ------------------------------------------------------------------ restore preferences
+
+(function init() {
+	$('search').value = load('search', '');
+	const types = load('types', null);
+	if (Array.isArray(types)) state.types = new Set(types);
+	state.loop = !!load('loop', false);
+	$('loopBtn').classList.toggle('on', state.loop);
+	$('rate').value = load('rate', '1');
+	$('follow').checked = load('follow', true);
+	const collapsed = !!load('takesCollapsed', false);
+	$('main').classList.toggle('takes-collapsed', collapsed);
+	$('toggleTakes').classList.toggle('on', !collapsed);
+	renderTakes();
+	renderMarkers();
+	renderTimeline();
+})();
+</script>
+</body>
+</html>
