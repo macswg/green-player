@@ -3,7 +3,7 @@
 A browser video player for recorded takes, with a searchable list of the markers
 logged during recording. Click a marker to jump to it.
 
-**Open it:** https://macswg.github.io/marker-player/
+**Open it:** https://macswg.github.io/green-player/
 
 Works in Chrome, Edge, Safari and Firefox on Mac and PC. No install, no account.
 
