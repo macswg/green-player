@@ -90,7 +90,8 @@ main {
 	display: grid;
 	grid-template-columns: 260px minmax(0, 1fr) 380px;
 }
-main.takes-collapsed { grid-template-columns: 0 minmax(0, 1fr) 380px; }
+/* the hidden panel leaves the grid, so two columns, not a zero-width first one the video would land in */
+main.takes-collapsed { grid-template-columns: minmax(0, 1fr) 380px; }
 main.takes-collapsed #takesPanel { display: none; }
 
 aside { background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
@@ -162,16 +163,19 @@ dialog code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 
 @media (max-width: 900px) {
 	body { overflow: auto; }
-	main, main.takes-collapsed { display: flex; flex-direction: column; }
+	/* stacked panels keep their own heights and the page scrolls; squeezed into the
+	   window, the take list (the only panel without a min-height) shrank to nothing */
+	main, main.takes-collapsed { display: flex; flex-direction: column; flex: none; }
+	main > * { flex-shrink: 0; }
 	#takesPanel { max-height: 30vh; border-right: 0; border-bottom: 1px solid var(--line); }
 	#stage { min-height: 60vh; }
-	#markersPanel { border-left: 0; border-top: 1px solid var(--line); min-height: 50vh; }
+	#markersPanel { border-left: 0; border-top: 1px solid var(--line); min-height: 50vh; max-height: 80vh; }
 }
 </style>
 </head>
 <body>
 <header>
-	<h1>Marker Player <span id="version" title="Version">v1.1</span></h1>
+	<h1>Marker Player <span id="version" title="Version">v1.2</span></h1>
 	<button id="toggleTakes" title="Show / hide the take list">Takes</button>
 	<button id="openFolder">Open folder…</button>
 	<button id="openFiles">Open files…</button>
@@ -726,10 +730,18 @@ function tick(force) {
 		const li = i >= 0 ? list.querySelector(`li[data-i="${i}"]`) : null;
 		if (li) {
 			li.classList.add('current');
-			if ($('follow').checked && !list.matches(':hover')) li.scrollIntoView({ block: 'nearest' });
+			if ($('follow').checked && !list.matches(':hover')) scrollListTo(list, li);
 		}
 		renderNow();
 	}
+}
+
+// keeps li in view by scrolling the list only: scrollIntoView also scrolls the page,
+// which on a narrow screen pushed the take list up out of sight
+function scrollListTo(list, li) {
+	const box = list.getBoundingClientRect(), row = li.getBoundingClientRect();
+	if (row.top < box.top) list.scrollTop -= box.top - row.top;
+	else if (row.bottom > box.bottom) list.scrollTop += row.bottom - box.bottom;
 }
 
 // what each d3 transport is on at the playhead, from all markers (not only the listed ones)
